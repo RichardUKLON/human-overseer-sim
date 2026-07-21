@@ -1,0 +1,41 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Deploy to gh-pages
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          # Stash the deploy workflow so it carries over
+          mkdir -p /tmp/keep
+          cp .github/workflows/deploy.yml /tmp/keep/
+
+          git checkout gh-pages
+          git rm -r --cached . 2>/dev/null || true
+          git clean -fdx
+
+          # Restore deploy workflow
+          mkdir -p .github/workflows
+          cp /tmp/keep/deploy.yml .github/workflows/
+
+          # Copy all files from master's current tree
+          git checkout master -- .
+
+          touch .nojekyll
+          git add -A
+          git diff --staged --quiet || git commit -m "deploy: sync from master"
+          git push origin gh-pages
