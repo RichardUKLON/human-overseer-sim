@@ -146,7 +146,7 @@
   function videoCardHTML(s) {
     if (s.videoUrl) {
       return '<div class="card fade-up-1">' +
-        '<video class="briefing-video" controls preload="metadata" aria-label="Briefing video: ' + esc(s.videoDuration) + '">' +
+        '<video class="briefing-video" controls playsinline preload="metadata" aria-label="Briefing video: ' + esc(s.videoDuration) + '">' +
         '<source src="' + esc(s.videoUrl) + '" type="video/mp4">' +
         '</video>' +
         '<div class="transcript">' +
@@ -1425,7 +1425,7 @@
     /* video (Tier 3 — exactly once in the course) */
     if (c.videoUrl) {
       return '<div class="card fade-up-1">' +
-        '<video class="consequence-video" controls preload="metadata" aria-label="Consequence video: ' + esc(c.title) + '">' +
+        '<video class="consequence-video" controls playsinline preload="metadata" aria-label="Consequence video: ' + esc(c.title) + '">' +
         '<source src="' + esc(c.videoUrl) + '" type="video/mp4">' +
         '</video>' +
         '<div class="transcript"><div class="transcript-head"><span class="transcript-label">Transcript</span></div>' +
