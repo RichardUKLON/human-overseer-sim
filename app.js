@@ -144,6 +144,19 @@
   }
 
   function videoCardHTML(s) {
+    if (s.videoEmbedUrl) {
+      var embedPadding = s.videoEmbedPadding || "56.458%";
+      var embedTitle = "briefing-" + s.id.toLowerCase() + "-" + s.requester.toLowerCase().replace(/\s+/g, "-");
+      return '<div class="card fade-up-1">' +
+        '<div style="padding:' + esc(embedPadding) + ' 0 0 0;position:relative;width:100%;">' +
+        '<iframe style="position:absolute;top:0;left:0;width:100%;height:100%;" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture; web-share" allowfullscreen frameborder="0" referrerpolicy="strict-origin-when-cross-origin" src="' + esc(s.videoEmbedUrl) + '" title="' + esc(embedTitle) + '"></iframe>' +
+        '</div>' +
+        '<div class="transcript">' +
+        '<div class="transcript-head"><span class="transcript-label">Transcript</span>' +
+        '<button type="button" class="btn-link" data-action="toggle-transcript" aria-expanded="false">Show</button></div>' +
+        '<p class="transcript-body" data-transcript hidden>' + escML(s.transcript) + '</p>' +
+        '</div></div>';
+    }
     if (s.videoUrl) {
       return '<div class="card fade-up-1">' +
         '<video class="briefing-video" controls playsinline preload="metadata" aria-label="Briefing video: ' + esc(s.videoDuration) + '">' +
@@ -1380,6 +1393,21 @@
       state.results = scoreAttempt(s);
       if (!state.replayMode) {
         state.completed[s.id] = { decision: state.decision, results: state.results, toolsUsed: Object.keys(state.toolsUsed) };
+        // SCORM: update cumulative score after each scored scenario
+        if (window.SCORM && s.scored) {
+          var p = computeProfile();
+          var totalMax = PLAY_ORDER.reduce(function (sum, id) {
+            var sc = SCENARIO_MAP[id];
+            return sc && sc.scored ? sum + sc.maxScore : sum;
+          }, 0);
+          var totalNum = PLAY_ORDER.reduce(function (n, id) {
+            var sc = SCENARIO_MAP[id];
+            return sc && sc.scored ? n + 1 : n;
+          }, 0);
+          if (totalMax > 0) {
+            window.SCORM.setScore(p.totalScore, totalMax);
+          }
+        }
       }
       var consequence = s.consequences && s.consequences[state.decision];
       setScreen(consequence ? "consequence" : "debrief");
@@ -1626,7 +1654,9 @@
     wireBriefingSection();
 
     on("[data-action=continue]", "click", function () {
-      var goProfile = allDone && !state.replayMode;
+      var goProfile = allDone && !state.replayMode;      if (allDone && !state.replayMode && window.SCORM) {
+        window.SCORM.complete();
+      }
       var goCheckpoint = !goProfile && !state.replayMode && !state.seenCheckpoint && completedCount() === HALFWAY;
       resetAttempt();
       setScreen(goProfile ? "profile" : goCheckpoint ? "checkpoint" : "map");
