@@ -29,9 +29,11 @@
     results: null,
     replayMode: false, /* replays never overwrite the first committed attempt */
     completed: {},  /* id -> { decision, results, toolsUsed } — in-memory only */
+    drafts: {},     /* id -> unfinished review state, retained while this tab stays open */
     notes: {},      /* id -> notepad text — session only */
     toolsUsed: {},  /* current attempt: tool id -> true (desk tools rail) */
-    seenCheckpoint: false /* halfway spaced-retrieval checkpoint shown once */
+    seenCheckpoint: false, /* halfway spaced-retrieval checkpoint shown once */
+    warmupTutorialDismissed: false
   };
 
   /* ---------- halfway (mini bonuses unlock after the first six reviews) ---------- */
@@ -115,13 +117,14 @@
       '</svg></div>';
   }
 
-  function headerHTML(location, tag) {
+  function headerHTML(location, tag, actionHTML) {
     return '<header class="site-header">' +
       '<div class="brand">' + markSVG(22, "#A80C35") +
       '<span class="visually-hidden">Marchwell Academy</span></div>' +
       '<div class="header-divider"></div>' +
       '<span class="header-location">' + location + '</span>' +
       (tag ? '<span class="header-tag">' + tag + '</span>' : "") +
+      (actionHTML || "") +
       gaugeSVG() +
       '</header>';
   }
@@ -131,7 +134,10 @@
     var n = orderIndexOf(s.id) + 1;
     var loc = (s.scored ? "Scenario " + n + " of " + PLAY_ORDER.length : "Warm-up") + " · <em>" + esc(s.title) + "</em>";
     var tag = state.replayMode ? "Replay — not scored" : s.scored ? "Scored" : "Warm-up — not scored";
-    return headerHTML(loc, tag);
+    var action = (state.screen === "brief" || state.screen === "desk")
+      ? '<button type="button" class="btn-link header-queue-link" data-action="return-map">Return to queue</button>'
+      : "";
+    return headerHTML(loc, tag, action);
   }
 
   function kicker(label) {
@@ -201,11 +207,12 @@
 
   /* ---------- artefact rendering (page | email) ---------- */
 
-  function segmentHTML(seg, i, total, mode, ids) {
+  function segmentHTML(seg, i, total, mode, ids, tourTarget) {
     var inner;
     if (mode === "inspect") {
       var flagged = !!state.flagged[seg.id];
       inner = '<button type="button" class="span-btn' + (flagged ? " is-flagged" : "") + '" ' +
+        (tourTarget ? 'data-tour="' + tourTarget + '" ' : "") +
         'data-seg="' + seg.id + '" aria-pressed="' + flagged + '" ' +
         'aria-label="Segment ' + (i + 1) + ' of ' + total + ': ' + esc(seg.text) + '">' +
         esc(seg.text) +
@@ -229,7 +236,10 @@
 
   function artefactHTML(s, mode, ids) {
     var total = s.body.length;
-    var bodyHTML = s.body.map(function (seg, i) { return segmentHTML(seg, i, total, mode, ids || []); }).join("");
+    var bodyHTML = s.body.map(function (seg, i) {
+      var tourTarget = s.id === "S01" && mode === "inspect" && seg.id === "s01-2" ? "flag-example" : "";
+      return segmentHTML(seg, i, total, mode, ids || [], tourTarget);
+    }).join("");
     var head = '<div class="artefact-head">' + markSVG(18, "#A80C35") +
       '<span class="artefact-label">' + esc(s.artefactLabel) + '</span>' +
       '<span class="artefact-subtitle">' + esc(s.artefactSubtitle) + '</span>' +
@@ -256,12 +266,13 @@
       '</div></div>';
   }
 
-  function radioGroupHTML(groupId, labelHTML, options) {
+  function radioGroupHTML(groupId, labelHTML, options, selectedId) {
     return '<fieldset class="options" role="radiogroup" aria-labelledby="' + groupId + '-label">' +
       '<legend id="' + groupId + '-label">' + labelHTML + '</legend>' +
       options.map(function (o, i) {
-        return '<button type="button" class="option-btn" role="radio" aria-checked="false" ' +
-          'data-group="' + groupId + '" data-value="' + o.id + '" tabindex="' + (i === 0 ? "0" : "-1") + '">' +
+        var selected = o.id === selectedId;
+        return '<button type="button" class="option-btn" role="radio" aria-checked="' + selected + '" ' +
+          'data-group="' + groupId + '" data-value="' + o.id + '" tabindex="' + (selected || (!selectedId && i === 0) ? "0" : "-1") + '">' +
           '<span class="radio-mark" aria-hidden="true"></span>' +
           '<span class="option-main"><span class="option-label">' + esc(o.label) + '</span>' +
           (o.hint ? '<span class="option-hint">' + esc(o.hint) + '</span>' : "") +
@@ -1077,6 +1088,159 @@
     });
   }
 
+  /* ---------- S01 guided warm-up tour ---------- */
+  var WARMUP_TOUR_STEPS = [
+    {
+      target: "[data-tour='warmup-status']",
+      title: "A safe practice review",
+      body: "This first review is a warm-up. Nothing you flag or decide here affects your calibration profile.",
+      placement: "bottom"
+    },
+    {
+      target: "[data-tour='desk-tools']",
+      title: "Desk tools",
+      body: "Use these tools to check external claims, search firm records, take notes, and ask one useful question. Their presence never tells you what is wrong.",
+      placement: "bottom"
+    },
+    {
+      target: "[data-tour='warmup-guide']",
+      title: "Warm-up guidance",
+      body: "This expandable guide demonstrates the kinds of checks a reviewer might consider. It appears only in this practice review.",
+      placement: "bottom"
+    },
+    {
+      target: "[data-tour='review-task']",
+      title: "Your review task",
+      body: "Read the document, then flag only text you could not defend if someone asked for the evidence behind it.",
+      placement: "bottom"
+    },
+    {
+      target: "[data-tour='flag-example']",
+      title: "Flag a passage",
+      body: "Click a passage like this, or reach it with Tab and press Enter. Flag only wording you could not defend if asked for the evidence behind it.",
+      placement: "top"
+    }
+  ];
+  var warmupTourTarget = null;
+
+  function warmupTutorialHTML(s) {
+    if (s.id !== "S01" || s.scored) return "";
+    return '<button type="button" class="warmup-tutorial-start" data-warmup-tutorial-start>Start warm-up tutorial</button>' +
+      '<div class="warmup-tutorial-overlay" data-warmup-tutorial hidden aria-live="polite">' +
+      '<div class="warmup-tutorial-spotlight" data-warmup-tutorial-spotlight aria-hidden="true"></div>' +
+      '<section class="warmup-tutorial-card" data-warmup-tutorial-card role="dialog" aria-modal="true" aria-labelledby="warmup-tutorial-title">' +
+      '<div class="warmup-tutorial-head"><div><p class="warmup-tutorial-count" data-warmup-tutorial-count></p><h2 id="warmup-tutorial-title" data-warmup-tutorial-title></h2></div>' +
+      '<button type="button" class="warmup-tutorial-close" data-warmup-tutorial-close aria-label="Close tutorial">×</button></div>' +
+      '<p class="warmup-tutorial-body" data-warmup-tutorial-body></p>' +
+      '<label class="warmup-tutorial-optout"><input type="checkbox" data-warmup-tutorial-optout> Don’t show this tutorial again</label>' +
+      '<div class="warmup-tutorial-actions"><button type="button" class="warmup-tutorial-skip" data-warmup-tutorial-skip>Skip tutorial</button>' +
+      '<button type="button" class="btn btn-primary" data-warmup-tutorial-next>Next</button></div></section></div>';
+  }
+
+  function clearWarmupTourTarget() {
+    if (!warmupTourTarget) return;
+    warmupTourTarget.classList.remove("warmup-tour-target");
+    warmupTourTarget = null;
+  }
+
+  function wireWarmupTutorial(s) {
+    if (s.id !== "S01" || s.scored) return;
+    var overlay = one("[data-warmup-tutorial]");
+    var card = one("[data-warmup-tutorial-card]");
+    var start = one("[data-warmup-tutorial-start]");
+    var spotlight = one("[data-warmup-tutorial-spotlight]");
+    if (!overlay || !card || !start) return;
+    var index = 0;
+
+    function close() {
+      var optout = one("[data-warmup-tutorial-optout]");
+      state.warmupTutorialDismissed = !!(optout && optout.checked);
+      overlay.hidden = true;
+      if (spotlight) spotlight.removeAttribute("style");
+      clearWarmupTourTarget();
+      start.focus();
+    }
+
+    function positionSpotlight() {
+      if (!warmupTourTarget || !spotlight) return;
+      var rect = warmupTourTarget.getBoundingClientRect();
+      var pad = 7;
+      spotlight.style.left = Math.max(6, rect.left - pad) + "px";
+      spotlight.style.top = Math.max(6, rect.top - pad) + "px";
+      spotlight.style.width = Math.min(window.innerWidth - 12, rect.width + pad * 2) + "px";
+      spotlight.style.height = Math.min(window.innerHeight - 12, rect.height + pad * 2) + "px";
+    }
+
+    function positionCard(step) {
+      if (window.innerWidth < 768 || !warmupTourTarget) {
+        card.removeAttribute("style");
+        return;
+      }
+      var rect = warmupTourTarget.getBoundingClientRect();
+      var width = Math.min(360, window.innerWidth - 32);
+      var height = card.offsetHeight || 280;
+      var gap = 20;
+      var left = rect.right + gap;
+      var top = Math.max(16, Math.min(rect.top, window.innerHeight - height - 16));
+      if (left + width > window.innerWidth - 16) {
+        left = rect.left - width - gap;
+      }
+      if (left < 16) {
+        left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
+        top = step.placement === "bottom" ? rect.bottom + gap : rect.top - height - gap;
+      }
+      card.style.width = width + "px";
+      card.style.left = Math.max(16, Math.min(left, window.innerWidth - width - 16)) + "px";
+      card.style.top = Math.max(16, Math.min(top, window.innerHeight - height - 16)) + "px";
+    }
+
+    function show(stepIndex) {
+      index = stepIndex;
+      var step = WARMUP_TOUR_STEPS[index];
+      clearWarmupTourTarget();
+      warmupTourTarget = app.querySelector(step.target);
+      if (warmupTourTarget) {
+        warmupTourTarget.classList.add("warmup-tour-target");
+      }
+      one("[data-warmup-tutorial-count]").textContent = "Warm-up tour · " + (index + 1) + " of " + WARMUP_TOUR_STEPS.length;
+      one("[data-warmup-tutorial-title]").textContent = step.title;
+      one("[data-warmup-tutorial-body]").textContent = step.body;
+      one("[data-warmup-tutorial-next]").textContent = index === WARMUP_TOUR_STEPS.length - 1 ? "Start review" : "Next";
+      if (warmupTourTarget && warmupTourTarget.scrollIntoView) {
+        warmupTourTarget.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
+      setTimeout(function () {
+        overlay.hidden = false;
+        positionSpotlight();
+        positionCard(step);
+        one("[data-warmup-tutorial-next]").focus();
+      }, warmupTourTarget ? 280 : 0);
+    }
+
+    start.addEventListener("click", function () {
+      state.warmupTutorialDismissed = false;
+      show(0);
+    });
+    one("[data-warmup-tutorial-close]").addEventListener("click", close);
+    one("[data-warmup-tutorial-skip]").addEventListener("click", close);
+    one("[data-warmup-tutorial-next]").addEventListener("click", function () {
+      if (index === WARMUP_TOUR_STEPS.length - 1) close(); else show(index + 1);
+    });
+    window.addEventListener("resize", function () {
+      if (!overlay.hidden) {
+        positionSpotlight();
+        positionCard(WARMUP_TOUR_STEPS[index]);
+      }
+    });
+    window.addEventListener("scroll", function () {
+      if (!overlay.hidden) {
+        positionSpotlight();
+        positionCard(WARMUP_TOUR_STEPS[index]);
+      }
+    }, true);
+    if (!state.warmupTutorialDismissed) setTimeout(function () { show(0); }, 50);
+  }
+
   /* ================= screens ================= */
 
   /* v0.8: landing screen — sits in front of the intro (owner decision) */
@@ -1142,7 +1306,8 @@
         (s.scored ? "" : ' <span class="map-warmup">Warm-up</span>') + '</span>';
       if (status === "next") {
         return '<button type="button" class="map-card map-card-next" data-start="' + id + '">' +
-          '<span class="map-card-top">' + num + '<span class="map-chip chip-next">Up next</span></span>' +
+          '<span class="map-card-top">' + num + '<span class="map-chip chip-next">' +
+          (state.drafts[id] ? 'Resume' : 'Up next') + '</span></span>' +
           title + '</button>';
       }
       if (status === "reviewed") {
@@ -1214,8 +1379,9 @@
       });
     });
     on("[data-action=reset-all]", "click", function () {
-      if (window.confirm("This clears all your reviews and calibration data so you can start over. Reset?")) {
+      if (window.confirm("This clears all completed reviews, unfinished drafts, and calibration data in this browser session. Reset?")) {
         state.completed = {};
+        state.drafts = {};
         resetAttempt();
         setScreen("map");
       }
@@ -1330,14 +1496,14 @@
     var s = scen();
     app.innerHTML = scenarioHeader() +
       '<main class="screen">' +
-      '<div class="fade-up">' + kicker("Review") +
+      '<div class="fade-up"' + (s.id === "S01" ? ' data-tour="warmup-status"' : "") + '>' + kicker("Review") +
       '<p class="lede">Flag anything you wouldn’t let leave the building — click a segment in the text, or Tab to it and press Enter. ' +
       'Flagging clean text costs you, so flag what you can defend.</p></div>' +
-      deskToolsHTML() +
-      '<div class="desk-divider fade-up-2" role="separator" aria-label="Your review task — read and flag the document">' +
+      '<div' + (s.id === "S01" ? ' data-tour="desk-tools"' : "") + '>' + deskToolsHTML() + '</div>' +
+      '<div class="desk-divider fade-up-2" role="separator" aria-label="Your review task — read and flag the document"' + (s.id === "S01" ? ' data-tour="review-task"' : "") + '>' +
       '<span class="desk-divider-label">Your review task</span>' +
       '</div>' +
-      warmupGuideHTML(s) +
+      (s.id === "S01" ? '<div data-tour="warmup-guide">' + warmupGuideHTML(s) + '</div>' : warmupGuideHTML(s)) +
       contextHTML(s) +
       artefactHTML(s, "inspect") +
       '<p class="flag-count fade-up-2">Flagged: <strong data-flag-count>' + flaggedIds().length + '</strong></p>' +
@@ -1345,19 +1511,23 @@
       '<div class="desk-divider fade-up-2" role="separator" aria-label="You’ve reviewed the document — now decide">' +
       '<span class="desk-divider-label">Now make your call</span>' +
       '</div>' +
-      '<div class="fade-up-2">' + radioGroupHTML("decision", kicker("Your decision - options change based on choice"), DECISIONS) + '</div>' +
-      '<div class="fade-up-2" data-justification hidden></div>' +
+      '<div class="fade-up-2">' + radioGroupHTML("decision", kicker("Your decision - options change based on choice"), DECISIONS, state.decision) + '</div>' +
+      '<div class="fade-up-2" data-justification' + (state.decision ? "" : " hidden") + '>' +
+      (state.decision ? radioGroupHTML("justification", kicker("Your read"),
+        (s.justificationOptions[state.decision] || []).map(function (j) { return { id: j.id, label: j.text, hint: null }; }),
+        state.justification) : "") + '</div>' +
       reviewMirrorCardHTML(s) +
       '<div class="btn-row fade-up-2" style="align-items:center;justify-content:space-between;">' +
       '<p class="commit-note">One committed attempt — you can’t re-flag after the reveal.</p>' +
       '<button type="button" class="btn btn-primary" data-action="commit" disabled>Commit review</button>' +
       '</div>' +
-      '</main>' + recordPaneHTML() + footerHTML();
+      '</main>' + recordPaneHTML() + warmupTutorialHTML(s) + footerHTML();
 
     wireDeskTools(s);
     wireWarmupGuide();
     wireReviewMirror();
     wireRecordPane();
+    wireWarmupTutorial(s);
 
     all("[data-seg]").forEach(function (btn) {
       btn.addEventListener("click", function () {
@@ -1373,12 +1543,12 @@
       });
     });
 
-    wireRadioGroup("decision", function (value) {
+    function showJustifications(value, keepJustification) {
       state.decision = value;
-      state.justification = null; /* options are decision-contingent — a new decision resets the read */
+      if (!keepJustification) state.justification = null; /* options are decision-contingent — a new decision resets the read */
       var jc = one("[data-justification]");
       jc.innerHTML = radioGroupHTML("justification", kicker("Your read"),
-        (s.justificationOptions[value] || []).map(function (j) { return { id: j.id, label: j.text, hint: null }; }));
+        (s.justificationOptions[value] || []).map(function (j) { return { id: j.id, label: j.text, hint: null }; }), state.justification);
       jc.hidden = false;
       wireRadioGroup("justification", function (v) {
         state.justification = v;
@@ -1387,10 +1557,17 @@
       });
       updateReviewMirror(s);
       updateCommit();
+    }
+
+    wireRadioGroup("decision", function (value) {
+      showJustifications(value, false);
     });
+
+    if (state.decision) showJustifications(state.decision, true);
 
     on("[data-action=commit]", "click", function () {
       state.results = scoreAttempt(s);
+      delete state.drafts[s.id];
       if (!state.replayMode) {
         state.completed[s.id] = { decision: state.decision, results: state.results, toolsUsed: Object.keys(state.toolsUsed) };
         // SCORM: update cumulative score after each scored scenario
@@ -1451,6 +1628,16 @@
         '<p class="transcript-body">' + escML(c.transcriptText) + '</p></div></div>';
     }
     /* video (Tier 3 — exactly once in the course) */
+    if (c.videoEmbedUrl) {
+      var consequenceEmbedPadding = c.videoEmbedPadding || "56.458%";
+      var consequenceEmbedTitle = "consequence-" + s.id.toLowerCase() + "-" + s.requester.toLowerCase().replace(/\s+/g, "-");
+      return '<div class="card fade-up-1">' +
+        '<div style="padding:' + esc(consequenceEmbedPadding) + ' 0 0 0;position:relative;width:100%;">' +
+        '<iframe style="position:absolute;top:0;left:0;width:100%;height:100%;" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture; web-share" allowfullscreen frameborder="0" referrerpolicy="strict-origin-when-cross-origin" src="' + esc(c.videoEmbedUrl) + '" title="' + esc(consequenceEmbedTitle) + '"></iframe>' +
+        '</div>' +
+        '<div class="transcript"><div class="transcript-head"><span class="transcript-label">Transcript</span></div>' +
+        '<p class="transcript-body">' + escML(c.transcriptText) + '</p></div></div>';
+    }
     if (c.videoUrl) {
       return '<div class="card fade-up-1">' +
         '<video class="consequence-video" controls playsinline preload="metadata" aria-label="Consequence video: ' + esc(c.title) + '">' +
@@ -2218,6 +2405,54 @@
 
   /* ================= state transitions ================= */
 
+  function copyPlain(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function saveDraft() {
+    if (!state.currentId || state.replayMode) return;
+    state.drafts[state.currentId] = {
+      screen: state.screen,
+      flagged: copyPlain(state.flagged),
+      decision: state.decision,
+      justification: state.justification,
+      toolsUsed: copyPlain(state.toolsUsed)
+    };
+  }
+
+  function navigationSnapshot() {
+    return {
+      humanOverseer: true,
+      screen: state.screen,
+      currentId: state.currentId,
+      flagged: copyPlain(state.flagged),
+      decision: state.decision,
+      justification: state.justification,
+      results: state.results ? copyPlain(state.results) : null,
+      replayMode: state.replayMode,
+      toolsUsed: copyPlain(state.toolsUsed)
+    };
+  }
+
+  function saveBrowserHistory(replace) {
+    if (!window.history || !window.history.pushState) return;
+    if (replace) window.history.replaceState(navigationSnapshot(), "", window.location.href);
+    else window.history.pushState(navigationSnapshot(), "", window.location.href);
+  }
+
+  function restoreNavigation(snapshot) {
+    state.screen = snapshot.screen;
+    state.currentId = snapshot.currentId;
+    state.flagged = snapshot.flagged || {};
+    state.decision = snapshot.decision || null;
+    state.justification = snapshot.justification || null;
+    state.results = snapshot.results || null;
+    state.replayMode = !!snapshot.replayMode;
+    state.toolsUsed = snapshot.toolsUsed || {};
+    render();
+    window.scrollTo(0, 0);
+  }
+
   function resetAttempt() {
     state.flagged = {};
     state.decision = null;
@@ -2232,12 +2467,20 @@
     state.currentId = id;
     resetAttempt();
     state.replayMode = !!replay;
-    setScreen("brief");
+    var draft = !replay && state.drafts[id];
+    if (draft) {
+      state.flagged = copyPlain(draft.flagged || {});
+      state.decision = draft.decision || null;
+      state.justification = draft.justification || null;
+      state.toolsUsed = copyPlain(draft.toolsUsed || {});
+    }
+    setScreen(draft && draft.screen === "desk" ? "desk" : "brief");
   }
 
   function setScreen(name) {
     state.screen = name;
     render();
+    saveBrowserHistory(false);
     window.scrollTo(0, 0);
   }
 
@@ -2257,7 +2500,18 @@
       case "wildcase": renderWildcase(); break;
       case "checkpoint": renderCheckpoint(); break;
     }
+    if (state.screen === "brief" || state.screen === "desk") {
+      on("[data-action=return-map]", "click", function () {
+        saveDraft();
+        setScreen("map");
+      });
+    }
   }
 
+  window.addEventListener("popstate", function (event) {
+    if (event.state && event.state.humanOverseer) restoreNavigation(event.state);
+  });
+
+  saveBrowserHistory(true);
   render();
 })();
