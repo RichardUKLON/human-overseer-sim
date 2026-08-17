@@ -1597,7 +1597,7 @@
 
   /* ---------- consequences: email | chat | voicemail | video ---------- */
 
-  function consequenceBodyHTML(c) {
+  function consequenceBodyHTML(s, c) {
     if (c.type === "email") {
       return '<div class="card fade-up-1">' +
         '<div class="email-head">' +
@@ -1664,7 +1664,7 @@
       '<main class="screen">' +
       '<div class="fade-up">' + kicker("What happened") +
       '<p class="lede">' + esc(c.leadIn) + '</p></div>' +
-      consequenceBodyHTML(c) +
+      consequenceBodyHTML(s, c) +
       '<div class="btn-row fade-up-2">' +
       '<button type="button" class="btn btn-primary" data-action="to-debrief">Continue to debrief</button>' +
       '</div></main>' + footerHTML();
