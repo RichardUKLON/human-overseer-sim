@@ -1104,6 +1104,8 @@ var SCENARIOS = {
     artefactSubtitle: "Advisory note · summary section · CLIENT-FACING",
     artefactTitle: "Advisory note — turnover analysis: summary",
     artefactMeta: "Client-facing · goes out under the firm's name",
+    videoEmbedUrl: "https://livid.com/embed/xFHIgbSkTEE5",
+    videoEmbedPadding: "56.25%",
     videoUrl: "videos/brief-s12-scene-marcus-elaine.mp4",
     videoDuration: "Briefing · Marcus & Elaine · 45 sec",
     transcript: "MARCUS: The turnover advisory for the client — the summary section's drafted and it's strong. It confirms the hybrid link they've been pushing, there's sector research backing it, the recommendation writes itself.\nELAINE: That's rather my concern. They told us the answer they wanted and we appear to have found it.\nMARCUS: We found it because it's there. There's a CIPD study with a thirty-one percent figure.\nELAINE: Which I'd want located and read before it goes out under our name. This is client-facing, Marcus. If that figure doesn't hold, it isn't just wrong — it's our credibility attached to their theory.\nMARCUS: Fine. Full review before it moves. Fresh eyes.\nELAINE: The freshest we have. And tell them to check everything — especially the parts that feel most convincing.",
@@ -1160,6 +1162,8 @@ var SCENARIOS = {
         tier: 3, type: "video",
         leadIn: "The advisory note went to the client under the firm's name. Some days later:",
         title: "Aftermath — Marcus and Elaine",
+        videoEmbedUrl: "https://livid.com/embed/tSmdHfU-zCdJ",
+        videoEmbedPadding: "56.25%",
         videoUrl: "videos/consequence-s12-scene-marcus-elaine.mp4",
         duration: "Consequence · Marcus & Elaine · 40 sec",
         transcriptText: "MARCUS: The client's board circulated our note to their advisers. One of them went looking for the CIPD study.\nELAINE: And?\nMARCUS: There's no study. The client is now asking what else in our analysis was — their word — “decorative”.\nELAINE: So the recommendation, the evidence, and our name — all attached to a theory we were asked to confirm and didn't check.\nMARCUS: I've asked for a call with their chair.\nELAINE: Before you do — the review. Who approved this, and what were they looking at when they did?"
